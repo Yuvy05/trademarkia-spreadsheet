@@ -1,0 +1,16 @@
+{
+  "rules": {
+    "documents": {
+      "$docId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "user_documents": {
+      "$userId": {
+        ".read": "auth != null && auth.uid == $userId",
+        ".write": "auth != null && auth.uid == $userId"
+      }
+    }
+  }
+}
