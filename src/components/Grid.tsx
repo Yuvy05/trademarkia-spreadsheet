@@ -2,14 +2,16 @@
 
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import { database } from "@/lib/firebase";
-import { ref, onValue, set, serverTimestamp } from "firebase/database";
+import { ref, onValue, set, serverTimestamp, update } from "firebase/database";
 import { useSpreadsheetStore } from "@/store/useSpreadsheetStore";
 import { evaluateCell } from "@/lib/parser";
+import { Bold, Italic, Palette } from "lucide-react";
 
+/** Types **/
 const COLUMNS = 26;
 const ROWS = 100;
 
-function getColStr(num: number) {
+function getColStr(num: number): string {
     let str = '';
     let temp = num;
     while (temp > 0) {
@@ -20,8 +22,8 @@ function getColStr(num: number) {
     return str;
 }
 
-const colHeaders = Array.from({ length: COLUMNS }, (_, i) => getColStr(i + 1));
-const rowHeaders = Array.from({ length: ROWS }, (_, i) => i + 1);
+const defaultColHeaders = Array.from({ length: COLUMNS }, (_, i) => getColStr(i + 1));
+const defaultRowHeaders = Array.from({ length: ROWS }, (_, i) => i + 1);
 
 interface GridProps {
     docId: string;
@@ -29,8 +31,32 @@ interface GridProps {
     myUid: string;
 }
 
+interface CellStyle {
+    bold?: boolean;
+    italic?: boolean;
+    color?: string;
+}
+
+interface CellData {
+    value?: string;
+    style?: CellStyle;
+    updatedBy?: string;
+    timestamp?: any;
+}
+
 export function Grid({ docId, presence, myUid }: GridProps) {
-    const [dbCells, setDbCells] = useState<Record<string, any>>({});
+    const [dbCells, setDbCells] = useState<Record<string, CellData>>({});
+
+    // Layout State
+    const [colOrder, setColOrder] = useState<string[]>(defaultColHeaders);
+    const [rowOrder, setRowOrder] = useState<number[]>(defaultRowHeaders);
+    const [colWidths, setColWidths] = useState<Record<string, number>>({});
+    const [rowHeights, setRowHeights] = useState<Record<number, number>>({});
+
+    // Drag Resizing State
+    const [resizingTarget, setResizingTarget] = useState<{ type: 'col' | 'row', id: string | number } | null>(null);
+    const [startSize, setStartSize] = useState(0);
+    const [startPos, setStartPos] = useState(0);
 
     const {
         activeCell, setActiveCell,
@@ -42,32 +68,39 @@ export function Grid({ docId, presence, myUid }: GridProps) {
     const gridContainerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        // 1. Fetch entire cells snapshot
         const cellsRef = ref(database, `documents/${docId}/cells`);
-        const unsub = onValue(cellsRef, (snap) => {
-            setDbCells(snap.val() || {});
+        const unsub = onValue(cellsRef, (snap) => setDbCells(snap.val() || {}));
+
+        const layoutRef = ref(database, `documents/${docId}/layout`);
+        const unsubLayout = onValue(layoutRef, (snap) => {
+            const data = snap.val();
+            if (data) {
+                if (data.colOrder) setColOrder(data.colOrder);
+                if (data.rowOrder) setRowOrder(data.rowOrder);
+                if (data.colWidths) setColWidths(data.colWidths);
+                if (data.rowHeights) setRowHeights(data.rowHeights);
+            }
         });
-        return unsub;
+
+        return () => { unsub(); unsubLayout(); };
     }, [docId]);
 
-    // Focus input when editing starts
     useEffect(() => {
         if (editingCell && inputRef.current) {
             inputRef.current.focus();
-            // Move cursor to end
             const len = inputRef.current.value.length;
             inputRef.current.setSelectionRange(len, len);
         }
     }, [editingCell]);
 
-    // Keyboard Navigation
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (!activeCell) return;
 
             const colStr = activeCell.replace(/[0-9]/g, '');
             const rowNum = parseInt(activeCell.replace(/[A-Z]/g, ''));
-            const colIndex = colHeaders.indexOf(colStr);
+            const colIndex = colOrder.indexOf(colStr);
+            const rowIndex = rowOrder.indexOf(rowNum);
 
             if (editingCell) {
                 if (e.key === 'Enter') {
@@ -80,35 +113,31 @@ export function Grid({ docId, presence, myUid }: GridProps) {
                 return;
             }
 
-            // Navigation mode
             if (e.key === 'Enter') {
                 setEditingCell(activeCell);
                 const currentVal = localValues[activeCell] ?? dbCells[activeCell]?.value ?? '';
-                setLocalValue(activeCell, currentVal); // Ensure it's ready for editing
+                setLocalValue(activeCell, currentVal);
                 e.preventDefault();
                 return;
             }
 
             if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.key)) {
                 e.preventDefault();
-                let nextRow = rowNum;
+                let nextRowIdx = rowIndex;
                 let nextColIdx = colIndex;
 
-                if (e.key === 'ArrowUp') nextRow = Math.max(1, rowNum - 1);
-                if (e.key === 'ArrowDown') nextRow = Math.min(ROWS, rowNum + 1);
+                if (e.key === 'ArrowUp') nextRowIdx = Math.max(0, rowIndex - 1);
+                if (e.key === 'ArrowDown') nextRowIdx = Math.min(rowOrder.length - 1, rowIndex + 1);
                 if (e.key === 'ArrowLeft') nextColIdx = Math.max(0, colIndex - 1);
-                if (e.key === 'ArrowRight' || e.key === 'Tab') nextColIdx = Math.min(COLUMNS - 1, colIndex + 1);
+                if (e.key === 'ArrowRight' || e.key === 'Tab') nextColIdx = Math.min(colOrder.length - 1, colIndex + 1);
 
-                const nextCell = `${colHeaders[nextColIdx]}${nextRow}`;
+                const nextCell = `${colOrder[nextColIdx] || colStr}${rowOrder[nextRowIdx] || rowNum}`;
                 setActiveCell(nextCell);
-
-                // Let's implement lightweight auto-scroll
                 const el = document.getElementById(`cell-${nextCell}`);
                 if (el) el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
             } else if (e.key === 'Backspace' || e.key === 'Delete') {
-                updateCellDatabase(activeCell, '');
+                updateCellDatabase(activeCell, { value: '' });
             } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-                // Start typing immediately overrides
                 setLocalValue(activeCell, e.key);
                 setEditingCell(activeCell);
             }
@@ -117,30 +146,40 @@ export function Grid({ docId, presence, myUid }: GridProps) {
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeCell, editingCell, dbCells, localValues]);
+    }, [activeCell, editingCell, dbCells, localValues, colOrder, rowOrder]);
 
-    const updateCellDatabase = (cellId: string, value: string) => {
-        if (!value.trim()) {
-            set(ref(database, `documents/${docId}/cells/${cellId}`), null);
+    const updateCellDatabase = (cellId: string, updates: Partial<CellData>) => {
+        const cellRef = ref(database, `documents/${docId}/cells/${cellId}`);
+        const currentData = dbCells[cellId] || {};
+
+        if (!updates.value && currentData.value === undefined && Object.keys(updates).length === 1 && 'value' in updates) {
+            set(cellRef, null);
         } else {
-            set(ref(database, `documents/${docId}/cells/${cellId}`), {
-                value,
-                updatedBy: myUid,
-                timestamp: serverTimestamp()
-            });
+            update(cellRef, { ...currentData, ...updates, updatedBy: myUid, timestamp: serverTimestamp() });
         }
-        // Update doc updatedAt
         set(ref(database, `documents/${docId}/metadata/updatedAt`), serverTimestamp());
     };
 
     const commitEdit = () => {
         if (!editingCell) return;
         const finalValue = localValues[editingCell];
-
         if (finalValue !== undefined) {
-            updateCellDatabase(editingCell, finalValue);
+            updateCellDatabase(editingCell, { value: finalValue });
         }
         setEditingCell(null);
+    };
+
+    const toggleFormat = (formatType: 'bold' | 'italic') => {
+        if (!activeCell) return;
+        const currentStyle = dbCells[activeCell]?.style || {};
+        const isSet = currentStyle[formatType];
+        updateCellDatabase(activeCell, { style: { ...currentStyle, [formatType]: !isSet } });
+    };
+
+    const setColor = (color: string) => {
+        if (!activeCell) return;
+        const currentStyle = dbCells[activeCell]?.style || {};
+        updateCellDatabase(activeCell, { style: { ...currentStyle, color } });
     };
 
     const mapPresenceToCells = useMemo(() => {
@@ -153,110 +192,254 @@ export function Grid({ docId, presence, myUid }: GridProps) {
         return map;
     }, [presence, myUid]);
 
-    return (
-        <div className="absolute inset-0 overflow-auto bg-[#09090b]" ref={gridContainerRef}>
-            {/* Top Left Corner */}
-            <div className="flex w-max">
-                <div className="w-12 h-8 bg-[#18181b] border-r border-b border-[#27272a] sticky top-0 left-0 z-30" />
+    // Resizing Logics
+    useEffect(() => {
+        const onMouseMove = (e: MouseEvent) => {
+            if (!resizingTarget) return;
+            if (resizingTarget.type === "col") {
+                const diff = e.clientX - startPos;
+                const newWidth = Math.max(40, startSize + diff);
+                setColWidths(prev => ({ ...prev, [resizingTarget.id]: newWidth }));
+                // Throttled Firebase update could go here, for now relying on local state for fluidity
+            } else {
+                const diff = e.clientY - startPos;
+                const newHeight = Math.max(20, startSize + diff);
+                setRowHeights(prev => ({ ...prev, [resizingTarget.id]: newHeight }));
+            }
+        };
+        const onMouseUp = () => {
+            if (resizingTarget) {
+                if (resizingTarget.type === 'col') {
+                    set(ref(database, `documents/${docId}/layout/colWidths/${resizingTarget.id}`), colWidths[resizingTarget.id as string] || startSize);
+                } else {
+                    set(ref(database, `documents/${docId}/layout/rowHeights/${resizingTarget.id}`), rowHeights[resizingTarget.id as number] || startSize);
+                }
+            }
+            setResizingTarget(null);
+        };
 
-                {/* Column Headers */}
-                <div className="flex sticky top-0 z-20">
-                    {colHeaders.map(col => (
-                        <div key={col} className="w-28 h-8 bg-[#18181b] border-r border-b border-[#27272a] flex items-center justify-center text-xs font-semibold text-gray-400 select-none">
-                            {col}
-                        </div>
-                    ))}
+        if (resizingTarget) {
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('mouseup', onMouseUp);
+        }
+        return () => {
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+        };
+    }, [resizingTarget, startPos, startSize, docId, colWidths, rowHeights]);
+
+    // Reordering Logics
+    const handleColDrop = (e: React.DragEvent, targetCol: string) => {
+        const sourceCol = e.dataTransfer.getData("col");
+        if (sourceCol && sourceCol !== targetCol) {
+            const newOrder = [...colOrder];
+            const srcIdx = newOrder.indexOf(sourceCol);
+            const tgtIdx = newOrder.indexOf(targetCol);
+            newOrder.splice(srcIdx, 1);
+            newOrder.splice(tgtIdx, 0, sourceCol);
+            set(ref(database, `documents/${docId}/layout/colOrder`), newOrder);
+        }
+    };
+
+    const handleRowDrop = (e: React.DragEvent, targetRow: number) => {
+        const sourceRowRaw = e.dataTransfer.getData("row");
+        if (!sourceRowRaw) return;
+        const sourceRow = parseInt(sourceRowRaw);
+        if (sourceRow && sourceRow !== targetRow) {
+            const newOrder = [...rowOrder];
+            const srcIdx = newOrder.indexOf(sourceRow);
+            const tgtIdx = newOrder.indexOf(targetRow);
+            newOrder.splice(srcIdx, 1);
+            newOrder.splice(tgtIdx, 0, sourceRow);
+            set(ref(database, `documents/${docId}/layout/rowOrder`), newOrder);
+        }
+    };
+
+    return (
+        <div className="absolute inset-0 flex flex-col bg-[#09090b]">
+            {/* Format Toolbar */}
+            <div className="h-10 shrink-0 bg-[#18181b] border-b border-[#27272a] flex items-center px-4 gap-4 z-40">
+                <div className="flex bg-[#27272a] rounded p-1 gap-1">
+                    <button onClick={() => toggleFormat('bold')} className="p-1 rounded hover:bg-white/10" disabled={!activeCell}>
+                        <Bold className="w-4 h-4 text-gray-300" />
+                    </button>
+                    <button onClick={() => toggleFormat('italic')} className="p-1 rounded hover:bg-white/10" disabled={!activeCell}>
+                        <Italic className="w-4 h-4 text-gray-300" />
+                    </button>
+                    <div className="relative p-1 rounded hover:bg-white/10 flex items-center justify-center cursor-pointer">
+                        <Palette className="w-4 h-4 text-gray-300" />
+                        <input
+                            type="color"
+                            className="absolute opacity-0 inset-0 w-full h-full cursor-pointer"
+                            onChange={e => setColor(e.target.value)}
+                            disabled={!activeCell}
+                        />
+                    </div>
+                </div>
+                <div className="text-xs text-gray-500 font-medium">
+                    {activeCell ? `Selected: ${activeCell}` : "Select a cell to style"}
                 </div>
             </div>
 
-            {/* Grid Rows */}
-            {rowHeaders.map(row => (
-                <div key={row} className="flex w-max">
-                    {/* Row Header */}
-                    <div className="w-12 h-6 bg-[#18181b] border-r border-b border-[#27272a] sticky left-0 z-20 flex items-center justify-center text-xs text-gray-400 select-none">
-                        {row}
-                    </div>
+            {/* Grid Area */}
+            <div className="flex-1 overflow-auto relative" ref={gridContainerRef}>
 
-                    {/* Row Cells */}
-                    {colHeaders.map(col => {
-                        const cellId = `${col}${row}`;
-                        const isActive = activeCell === cellId;
-                        const isEditing = editingCell === cellId;
+                {/* Top Left Corner */}
+                <div className="flex w-max">
+                    <div className="w-12 h-8 bg-[#18181b] border-r border-b border-[#27272a] sticky top-0 left-0 z-30" />
 
-                        const cellPresence = mapPresenceToCells[cellId];
-
-                        // Evaluated Value calculation
-                        const rawValue = isEditing ? (localValues[cellId] ?? dbCells[cellId]?.value ?? '') : (dbCells[cellId]?.value ?? '');
-
-                        let displayValue = rawValue;
-                        if (!isEditing && rawValue.startsWith('=')) {
-                            displayValue = evaluateCell(cellId, dbCells);
-                        }
-
-                        let textColor = 'text-gray-200';
-                        if (displayValue.startsWith('#')) {
-                            textColor = 'text-red-400 font-bold';
-                        } else if (displayValue !== '' && !isNaN(Number(displayValue))) {
-                            const num = Number(displayValue);
-                            if (num < 0) textColor = 'text-red-400';
-                            else if (num > 0) textColor = 'text-green-400';
-                        }
-
-                        return (
-                            <div
-                                id={`cell-${cellId}`}
-                                key={cellId}
-                                onClick={() => {
-                                    if (!isEditing) {
-                                        setActiveCell(cellId);
-                                        if (editingCell && editingCell !== cellId) commitEdit();
-                                    }
-                                }}
-                                onDoubleClick={() => {
-                                    setActiveCell(cellId);
-                                    setEditingCell(cellId);
-                                    setLocalValue(cellId, dbCells[cellId]?.value ?? '');
-                                }}
-                                className={`
-                  w-28 h-6 border-r border-b border-[#27272a] relative select-none
-                  ${isActive && !isEditing ? 'border-2 border-blue-500 z-10 bg-blue-500/10' : ''}
-                  ${!isActive && cellPresence ? 'border-2 z-10' : ''}
-                  ${!isActive && !cellPresence ? 'bg-[#18181b] hover:bg-[#27272a]/50' : ''}
-                `}
-                                style={!isActive && cellPresence ? {
-                                    borderColor: cellPresence.color,
-                                    backgroundColor: `${cellPresence.color}22`
-                                } : {}}
-                            >
-                                {/* Presence Label Ring */}
-                                {!isActive && cellPresence && (
+                    {/* Column Headers */}
+                    <div className="flex sticky top-0 z-20">
+                        {colOrder.map(col => {
+                            const w = colWidths[col] || 112;
+                            return (
+                                <div
+                                    key={col}
+                                    draggable
+                                    onDragStart={(e) => e.dataTransfer.setData("col", col)}
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onDrop={(e) => handleColDrop(e, col)}
+                                    className="h-8 bg-[#18181b] border-r border-b border-[#27272a] flex items-center justify-center text-xs font-semibold text-gray-400 select-none relative hover:bg-white/5 cursor-grab active:cursor-grabbing"
+                                    style={{ width: w, minWidth: w }}
+                                >
+                                    {col}
                                     <div
-                                        className="absolute -top-[18px] -right-[2px] text-[9px] px-1 py-0.5 rounded-sm text-white font-bold whitespace-nowrap z-20"
-                                        style={{ backgroundColor: cellPresence.color }}
-                                    >
-                                        {cellPresence.name}
-                                    </div>
-                                )}
-
-                                {isActive && isEditing ? (
-                                    <input
-                                        ref={inputRef}
-                                        className="absolute inset-0 w-full h-full bg-[#09090b] text-white border-2 border-blue-500 outline-none px-1 text-xs z-30 shadow-[0_0_15px_rgba(59,130,246,0.5)]"
-                                        value={localValues[cellId] ?? ''}
-                                        onChange={(e) => setLocalValue(cellId, e.target.value)}
-                                        onBlur={commitEdit}
+                                        className="absolute right-0 top-0 bottom-0 w-2 hover:bg-blue-500/50 cursor-col-resize z-10"
+                                        onMouseDown={(e) => {
+                                            e.stopPropagation();
+                                            setResizingTarget({ type: 'col', id: col });
+                                            setStartSize(w);
+                                            setStartPos(e.clientX);
+                                        }}
                                     />
-                                ) : (
-                                    <div className={`px-1.5 py-1 text-xs truncate w-full h-full ${textColor}`}>
-                                        {displayValue}
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })}
+                                </div>
+                            )
+                        })}
+                    </div>
                 </div>
-            ))}
-            <div className="h-20" /> {/* Bottom padding */}
+
+                {/* Grid Rows */}
+                {rowOrder.map(row => {
+                    const h = rowHeights[row] || 24;
+                    return (
+                        <div key={row} className="flex w-max" style={{ height: h }}>
+                            {/* Row Header */}
+                            <div
+                                draggable
+                                onDragStart={(e) => e.dataTransfer.setData("row", row.toString())}
+                                onDragOver={(e) => e.preventDefault()}
+                                onDrop={(e) => handleRowDrop(e, row)}
+                                className="w-12 bg-[#18181b] border-r border-b border-[#27272a] sticky left-0 z-20 flex items-center justify-center text-xs text-gray-400 select-none relative hover:bg-white/5 cursor-grab active:cursor-grabbing"
+                                style={{ height: h, minHeight: h }}
+                            >
+                                {row}
+                                <div
+                                    className="absolute bottom-0 left-0 right-0 h-2 hover:bg-blue-500/50 cursor-row-resize z-10"
+                                    onMouseDown={(e) => {
+                                        e.stopPropagation();
+                                        setResizingTarget({ type: 'row', id: row });
+                                        setStartSize(h);
+                                        setStartPos(e.clientY);
+                                    }}
+                                />
+                            </div>
+
+                            {/* Row Cells */}
+                            {colOrder.map(col => {
+                                const cellId = `${col}${row}`;
+                                const isActive = activeCell === cellId;
+                                const isEditing = editingCell === cellId;
+                                const cellPresence = mapPresenceToCells[cellId];
+
+                                const w = colWidths[col] || 112;
+
+                                const rawData = dbCells[cellId] || {};
+                                const rawValue = isEditing ? (localValues[cellId] ?? rawData.value ?? '') : (rawData.value ?? '');
+
+                                let displayValue = rawValue;
+                                if (!isEditing && rawValue.startsWith('=')) {
+                                    // Suppress TS error since evaluateCell accepts Record<string, any>
+                                    displayValue = evaluateCell(cellId, dbCells as any);
+                                }
+
+                                // Styling
+                                const styleSettings = rawData.style || {};
+                                let textColor = styleSettings.color || 'text-gray-200';
+                                if (displayValue.startsWith('#')) textColor = 'text-red-400 font-bold';
+                                else if (!styleSettings.color && displayValue !== '' && !isNaN(Number(displayValue))) {
+                                    const num = Number(displayValue);
+                                    if (num < 0) textColor = 'text-red-400';
+                                    else if (num > 0) textColor = 'text-green-400';
+                                }
+
+                                const customStyles: React.CSSProperties = {};
+                                if (styleSettings.bold) customStyles.fontWeight = 'bold';
+                                if (styleSettings.italic) customStyles.fontStyle = 'italic';
+                                if (styleSettings.color) customStyles.color = styleSettings.color;
+
+                                return (
+                                    <div
+                                        id={`cell-${cellId}`}
+                                        key={cellId}
+                                        onClick={() => {
+                                            if (!isEditing) {
+                                                setActiveCell(cellId);
+                                                if (editingCell && editingCell !== cellId) commitEdit();
+                                            }
+                                        }}
+                                        onDoubleClick={() => {
+                                            setActiveCell(cellId);
+                                            setEditingCell(cellId);
+                                            setLocalValue(cellId, rawData.value ?? '');
+                                        }}
+                                        className={`
+                                  border-r border-b border-[#27272a] relative select-none
+                                  ${isActive && !isEditing ? 'border-2 border-blue-500 z-10 bg-blue-500/10' : ''}
+                                  ${!isActive && cellPresence ? 'border-2 z-10' : ''}
+                                  ${!isActive && !cellPresence ? 'bg-[#18181b] hover:bg-[#27272a]/50' : ''}
+                                `}
+                                        style={{
+                                            width: w, minWidth: w, height: h, minHeight: h,
+                                            ...(!isActive && cellPresence ? {
+                                                borderColor: cellPresence.color,
+                                                backgroundColor: `${cellPresence.color}22`
+                                            } : {})
+                                        }}
+                                    >
+                                        {!isActive && cellPresence && (
+                                            <div
+                                                className="absolute -top-[18px] -right-[2px] text-[9px] px-1 py-0.5 rounded-sm text-white font-bold whitespace-nowrap z-20"
+                                                style={{ backgroundColor: cellPresence.color }}
+                                            >
+                                                {cellPresence.name}
+                                            </div>
+                                        )}
+
+                                        {isActive && isEditing ? (
+                                            <input
+                                                ref={inputRef}
+                                                className="absolute inset-0 w-full h-full bg-[#09090b] text-white border-2 border-blue-500 outline-none px-1 text-xs z-30 shadow-[0_0_15px_rgba(59,130,246,0.5)]"
+                                                style={customStyles}
+                                                value={localValues[cellId] ?? ''}
+                                                onChange={(e) => setLocalValue(cellId, e.target.value)}
+                                                onBlur={commitEdit}
+                                            />
+                                        ) : (
+                                            <div
+                                                className={`px-1.5 py-1 text-xs truncate w-full h-full ${!styleSettings.color && textColor.startsWith('text-') ? textColor : ''}`}
+                                                style={customStyles}
+                                            >
+                                                {displayValue}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    );
+                })}
+                <div className="h-20" /> {/* Bottom padding */}
+            </div>
         </div>
     );
 }

@@ -7,7 +7,7 @@ import { database } from "@/lib/firebase";
 import { ref, onValue, set, onDisconnect, serverTimestamp, get, update } from "firebase/database";
 import { useSpreadsheetStore } from "@/store/useSpreadsheetStore";
 import { Grid } from "@/components/Grid";
-import { Loader2, ArrowLeft, Users, Cloud, CloudOff, CheckCircle2, Download, Upload, Trash2 } from "lucide-react";
+import { Loader2, ArrowLeft, Users, Cloud, CloudOff, CheckCircle2, Download, Upload, Trash2, FileJson } from "lucide-react";
 import { v4 as uuidv4 } from 'uuid';
 
 export default function DocumentPage() {
@@ -129,6 +129,23 @@ export default function DocumentPage() {
         document.body.removeChild(link);
     };
 
+    const handleExportJSON = async () => {
+        const cellsRef = ref(database, `documents/${id}/cells`);
+        const snap = await get(cellsRef);
+        const cells = snap.val() || {};
+
+        const jsonString = JSON.stringify(cells, null, 2);
+        const blob = new Blob([jsonString], { type: "application/json" });
+        const href = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = href;
+        link.download = `${docTitle || "spreadsheet"}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(href);
+    };
+
     const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -233,6 +250,13 @@ export default function DocumentPage() {
                             className="p-1.5 hover:bg-white/10 rounded transition-colors"
                         >
                             <Download className="w-4 h-4 text-gray-400 hover:text-white" />
+                        </button>
+                        <button
+                            onClick={handleExportJSON}
+                            title="Export to JSON"
+                            className="p-1.5 hover:bg-white/10 rounded transition-colors"
+                        >
+                            <FileJson className="w-4 h-4 text-gray-400 hover:text-white" />
                         </button>
                         <button
                             onClick={() => fileInputRef.current?.click()}
