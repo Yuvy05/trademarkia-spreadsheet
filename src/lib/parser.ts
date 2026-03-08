@@ -48,9 +48,10 @@ export function evaluateFormula(formula: string, snapshot: Snapshot, visited = n
 
     const expression = formula.slice(1).toUpperCase();
 
-    // Handle =SUM(A1:A5)
-    if (expression.startsWith('SUM(') && expression.endsWith(')')) {
-        const args = expression.slice(4, -1);
+    const funcMatch = expression.match(/^([A-Z]+)\((.*)\)$/);
+    if (funcMatch) {
+        const funcName = funcMatch[1];
+        const args = funcMatch[2];
 
         // Expand ranges A1:B2 to A1, A2, B1, B2
         const expandedArgs = args.replace(RANGE_REGEX, (match, start, end) => {
@@ -58,24 +59,30 @@ export function evaluateFormula(formula: string, snapshot: Snapshot, visited = n
         });
 
         const cellRefs = expandedArgs.split(',').map(s => s.trim());
-        let sum = 0;
+        const values: number[] = [];
 
         for (const ref of cellRefs) {
             if (!isCellRef(ref)) {
                 const num = parseFloat(ref);
-                if (!isNaN(num)) sum += num;
+                if (!isNaN(num)) values.push(num);
                 continue;
             }
             const val = evaluateCell(ref, snapshot, visited);
             const num = parseFloat(val);
-            if (!isNaN(num)) sum += num;
+            if (!isNaN(num)) values.push(num);
         }
-        return sum.toString();
+
+        if (funcName === 'SUM') return values.reduce((a, b) => a + b, 0).toString();
+        if (funcName === 'AVERAGE') return (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0).toString();
+        if (funcName === 'MIN') return (values.length ? Math.min(...values) : 0).toString();
+        if (funcName === 'MAX') return (values.length ? Math.max(...values) : 0).toString();
+        if (funcName === 'COUNT') return values.length.toString();
+        // Fallback for unknown function
     }
 
     // Handle basic arithmetic by substituting cell refs with their evaluated numbers
     // DANGEROUS: eval() is used for simplicity, but we sanitize to only arithmetic and digits
-    let evalString = expression;
+    let evalString = expression.replace(/\^/g, '**');
     let hasCycle = false;
 
     evalString = evalString.replace(CELL_REF_REGEX, (match) => {

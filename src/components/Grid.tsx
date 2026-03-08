@@ -193,6 +193,15 @@ export function Grid({ docId, presence, myUid }: GridProps) {
                             displayValue = evaluateCell(cellId, dbCells);
                         }
 
+                        let textColor = 'text-gray-200';
+                        if (displayValue.startsWith('#')) {
+                            textColor = 'text-red-400 font-bold';
+                        } else if (displayValue !== '' && !isNaN(Number(displayValue))) {
+                            const num = Number(displayValue);
+                            if (num < 0) textColor = 'text-red-400';
+                            else if (num > 0) textColor = 'text-green-400';
+                        }
+
                         return (
                             <div
                                 id={`cell-${cellId}`}
@@ -238,7 +247,7 @@ export function Grid({ docId, presence, myUid }: GridProps) {
                                         onBlur={commitEdit}
                                     />
                                 ) : (
-                                    <div className={`px-1.5 py-1 text-xs truncate w-full h-full ${displayValue.startsWith('#') ? 'text-red-400 font-bold' : 'text-gray-200'}`}>
+                                    <div className={`px-1.5 py-1 text-xs truncate w-full h-full ${textColor}`}>
                                         {displayValue}
                                     </div>
                                 )}
