@@ -1,4 +1,7 @@
 "use client";
+//  loads the spreadsheet grid component 
+//  multiple users working on the same document can see each other.
+
 
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -131,6 +134,7 @@ export default function DocumentPage() {
         document.body.removeChild(link);
     };
 
+    // export feature
     const handleExportJSON = async () => {
         const cellsRef = ref(database, `documents/${id}/cells`);
         const snap = await get(cellsRef);
@@ -148,6 +152,7 @@ export default function DocumentPage() {
         URL.revokeObjectURL(href);
     };
 
+    // import feature
     const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;

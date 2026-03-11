@@ -11,13 +11,16 @@ import { Bold, Italic, Palette } from "lucide-react";
 const COLUMNS = 26;
 const ROWS = 100;
 
-function getColStr(num: number): string {
+function getColStr(num: number): string { // converts number to column label
     let str = '';
     let temp = num;
     while (temp > 0) {
         const mod = (temp - 1) % 26;
         str = String.fromCharCode(65 + mod) + str;
         temp = Math.floor((temp - mod) / 26);
+
+        // 65 + 0 = 'A'
+        // 65 + 1 = 'B'
     }
     return str;
 }
@@ -71,6 +74,9 @@ export function Grid({ docId, presence, myUid, mySessionId }: GridProps) {
     useEffect(() => {
         const cellsRef = ref(database, `documents/${docId}/cells`);
         const unsub = onValue(cellsRef, (snap) => setDbCells(snap.val() || {}));
+
+        // Real time Sync
+        // Whenever database changes → UI updates
 
         const layoutRef = ref(database, `documents/${docId}/layout`);
         const unsubLayout = onValue(layoutRef, (snap) => {
@@ -151,6 +157,9 @@ export function Grid({ docId, presence, myUid, mySessionId }: GridProps) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeCell, editingCell, dbCells, localValues, colOrder, rowOrder]);
 
+    
+    // Cell Update
+    
     const updateCellDatabase = (cellId: string, updates: Partial<CellData>) => {
         const cellRef = ref(database, `documents/${docId}/cells/${cellId}`);
         const currentData = dbCells[cellId] || {};
@@ -310,6 +319,7 @@ export function Grid({ docId, presence, myUid, mySessionId }: GridProps) {
                                         className="absolute right-0 top-0 bottom-0 w-2 hover:bg-blue-500/50 cursor-col-resize z-10"
                                         onMouseDown={(e) => {
                                             e.stopPropagation();
+                                            e.preventDefault();
                                             setResizingTarget({ type: 'col', id: col });
                                             setStartSize(w);
                                             setStartPos(e.clientX);
@@ -340,6 +350,7 @@ export function Grid({ docId, presence, myUid, mySessionId }: GridProps) {
                                     className="absolute bottom-0 left-0 right-0 h-2 hover:bg-blue-500/50 cursor-row-resize z-10"
                                     onMouseDown={(e) => {
                                         e.stopPropagation();
+                                        e.preventDefault();
                                         setResizingTarget({ type: 'row', id: row });
                                         setStartSize(h);
                                         setStartPos(e.clientY);

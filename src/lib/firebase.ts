@@ -12,8 +12,12 @@ const firebaseConfig = {
   appId: "1:435208523401:web:04df4179fc9b01607d4058"
 };
 
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const auth = getAuth(app);
-const database = getDatabase(app);
+// if firebase already exists use it only(using get apps) , do not create it twice , if not there initialsie it 
 
-export { app, auth, database };
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+const auth = getAuth(app); // login system
+const database = getDatabase(app); // realtime data
+
+export { app, auth, database }; // whole project can use Firebase
+
+// output -> fb realtime database , fb authentication

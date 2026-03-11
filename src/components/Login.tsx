@@ -21,7 +21,7 @@ export function Login() {
         e.preventDefault();
         if (!name.trim()) return;
         setIsJoining(true);
-        await signInGuest(name.trim());
+        await signInGuest(name.trim()); // logs them into Frebase
         setIsJoining(false);
     };
 

@@ -25,6 +25,9 @@ export default function Home() {
     if (!user) return;
 
     // Fetch user documents index
+
+    // The onValue listener updates the UI whenever data changes
+
     const userDocsRef = ref(database, `user_documents/${user.uid}`);
     const unsubscribe = onValue(userDocsRef, (snapshot) => {
       const docs = snapshot.val();

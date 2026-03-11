@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-
+// stores ui state
 interface SpreadsheetState {
     activeCell: string | null;
     editingCell: string | null;
