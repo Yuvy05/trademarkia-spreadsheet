@@ -138,9 +138,11 @@ export function Grid({ docId, presence, myUid, mySessionId }: GridProps) {
                 if (el) el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
             } else if (e.key === 'Backspace' || e.key === 'Delete') {
                 updateCellDatabase(activeCell, { value: '' });
+                e.preventDefault();
             } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
                 setLocalValue(activeCell, e.key);
                 setEditingCell(activeCell);
+                e.preventDefault();
             }
         };
 
