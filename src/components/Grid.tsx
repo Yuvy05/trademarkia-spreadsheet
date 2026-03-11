@@ -29,6 +29,7 @@ interface GridProps {
     docId: string;
     presence: Record<string, any>;
     myUid: string;
+    mySessionId: string;
 }
 
 interface CellStyle {
@@ -44,7 +45,7 @@ interface CellData {
     timestamp?: any;
 }
 
-export function Grid({ docId, presence, myUid }: GridProps) {
+export function Grid({ docId, presence, myUid, mySessionId }: GridProps) {
     const [dbCells, setDbCells] = useState<Record<string, CellData>>({});
 
     // Layout State
@@ -184,13 +185,13 @@ export function Grid({ docId, presence, myUid }: GridProps) {
 
     const mapPresenceToCells = useMemo(() => {
         const map: Record<string, { color: string, name: string }> = {};
-        Object.entries(presence).forEach(([uid, data]) => {
-            if (uid !== myUid && data.activeCell) {
+        Object.entries(presence).forEach(([sid, data]) => {
+            if (sid !== mySessionId && data.activeCell) {
                 map[data.activeCell] = { color: data.color, name: data.name };
             }
         });
         return map;
-    }, [presence, myUid]);
+    }, [presence, mySessionId]);
 
     // Resizing Logics
     useEffect(() => {

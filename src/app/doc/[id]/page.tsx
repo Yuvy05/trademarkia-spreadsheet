@@ -18,6 +18,7 @@ export default function DocumentPage() {
     const [docTitle, setDocTitle] = useState("Loading...");
     const [presence, setPresence] = useState<Record<string, any>>({});
     const [syncStatus, setSyncStatus] = useState<"synced" | "syncing" | "offline">("syncing");
+    const [sessionId] = useState(() => uuidv4());
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -51,13 +52,14 @@ export default function DocumentPage() {
 
         // Presence listener setup
         const presenceRef = ref(database, `documents/${id}/presence`);
-        const myPresenceRef = ref(database, `documents/${id}/presence/${user.uid}`);
+        const myPresenceRef = ref(database, `documents/${id}/presence/${sessionId}`);
 
         // Setup online/offline tracking
         const connectedRef = ref(database, ".info/connected");
 
         const unsubscribeConn = onValue(connectedRef, (snap) => {
             if (snap.val() === true) {
+                // you are online
                 setSyncStatus("synced");
                 const presenceData = {
                     name: user.displayName || "Anonymous",
@@ -67,6 +69,7 @@ export default function DocumentPage() {
                 };
                 set(myPresenceRef, presenceData);
                 onDisconnect(myPresenceRef).remove();
+                // remove you from the DB if your wifi dies or tab closes
             } else {
                 setSyncStatus("offline");
             }
@@ -78,14 +81,13 @@ export default function DocumentPage() {
 
         // Subscribe to activeCell changes to update presence
         const unsubStore = useSpreadsheetStore.subscribe((state) => {
-            if (syncStatus === "synced") {
-                set(myPresenceRef, {
-                    name: user.displayName || "Anonymous",
-                    color: hexColor,
-                    activeCell: state.activeCell,
-                    timestamp: serverTimestamp()
-                });
-            }
+            set(myPresenceRef, {
+                uid: user.uid,
+                name: user.displayName || "Anonymous",
+                color: hexColor,
+                activeCell: state.activeCell,
+                timestamp: serverTimestamp()
+            });
         });
 
         return () => {
@@ -207,7 +209,7 @@ export default function DocumentPage() {
     }
 
     // Filter out self from active presence to render avatars
-    const activeCollaborators = Object.entries(presence).filter(([uid]) => uid !== user.uid);
+    const activeCollaborators = Object.entries(presence).filter(([sid]) => sid !== sessionId);
 
     return (
         <div className="flex flex-col h-screen bg-[#09090b] text-white overflow-hidden">
@@ -285,9 +287,9 @@ export default function DocumentPage() {
                     <div className="flex items-center gap-2">
                         <Users className="w-4 h-4 text-gray-500" />
                         <div className="flex -space-x-2">
-                            {activeCollaborators.map(([uid, data]) => (
+                            {activeCollaborators.map(([sid, data]) => (
                                 <div
-                                    key={uid}
+                                    key={sid}
                                     className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 border-[#18181b] relative group"
                                     style={{ backgroundColor: data.color }}
                                     title={data.name}
@@ -317,7 +319,7 @@ export default function DocumentPage() {
 
             {/* Editor Main Canvas */}
             <main className="flex-1 overflow-hidden relative">
-                <Grid docId={id as string} presence={presence} myUid={user.uid} />
+                <Grid docId={id as string} presence={presence} myUid={user.uid} mySessionId={sessionId} />
             </main>
         </div>
     );

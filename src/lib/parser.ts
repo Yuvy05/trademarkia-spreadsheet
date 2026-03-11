@@ -128,6 +128,7 @@ export function evaluateCell(cellId: string, snapshot: Snapshot, visited = new S
         return rawValue; // It's literal text or number
     }
 
+    // formula evaluations
     visited.add(cellId);
     try {
         const result = evaluateFormula(rawValue, snapshot, visited);
